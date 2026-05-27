@@ -1,0 +1,12 @@
+.DS_Store
+archive.csv
+categorized_transactions.csv
+transaction_csv_sources.md
+.env
+credentials.json
+token.json
+
+__pycache__/
+.venv/
+data/
+sandboxes/
