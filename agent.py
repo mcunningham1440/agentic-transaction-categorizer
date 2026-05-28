@@ -47,6 +47,8 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
             )
         similar_block = "\n".join(lines)
 
+    categories_block = "\n".join(f"  - {c}" for c in CATEGORIES)
+
     return (
         "Transaction:\n"
         f"  Date: {transaction['Date']}\n"
@@ -57,7 +59,7 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
         f"{similar_block}\n\n"
         "Categorize this transaction into exactly ONE of these categories by "
         "calling categorize_transaction:\n"
-        f"  {', '.join(CATEGORIES)}"
+        f"{categories_block}"
     )
 
 
