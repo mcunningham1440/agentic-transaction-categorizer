@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 from agent import categorize_dataframe
+from sheets_archive import load_archive_from_sheets
 from tools import CATEGORIES
 
 
@@ -52,7 +53,7 @@ def find_close_strings(query_string, df, cutoff=0.8):
 # similarity pool — this is intentional, since "Income" / "Internal transfer"
 # etc. are not spending categories the agent should learn from.
 def load_archive() -> pd.DataFrame:
-    archive = pd.read_csv(os.path.join(SCRIPT_DIR, "archive.csv"))
+    archive = load_archive_from_sheets()
     archive = archive[archive["Category"].isin(CATEGORIES)].reset_index(drop=True)
     return archive
 

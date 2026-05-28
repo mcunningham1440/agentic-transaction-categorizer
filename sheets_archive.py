@@ -4,7 +4,7 @@ import re
 import pandas as pd
 from dotenv import load_dotenv
 
-from tools import _build_sheets_service
+from google_auth import build_sheets_service
 
 
 MONTH_NAMES = (
@@ -50,7 +50,7 @@ def load_archive_from_sheets(spreadsheet_id: str = None) -> pd.DataFrame:
             "spreadsheet ID for your transaction archive to .env."
         )
 
-    service = _build_sheets_service()
+    service = build_sheets_service()
     month_tabs = _list_month_tabs(service, spreadsheet_id)
     if not month_tabs:
         raise RuntimeError(

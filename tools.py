@@ -5,11 +5,9 @@ import re
 import sqlite3
 from datetime import datetime, time, timezone
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 from perplexity import Perplexity
+
+from google_auth import build_calendar_service
 
 
 CATEGORIES = (
@@ -43,12 +41,6 @@ CATEGORIES = (
 IMESSAGE_DB_PATH = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "imessage_search", "chat.db")
 )
-GOOGLE_CREDENTIALS_PATH = os.path.join(os.path.dirname(__file__), "credentials.json")
-GOOGLE_TOKEN_PATH = os.path.join(os.path.dirname(__file__), "token.json")
-GOOGLE_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
-]
 
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
 
@@ -251,41 +243,6 @@ _calendar_service = None
 _calendar_service_lock = asyncio.Lock()
 
 
-def _load_google_credentials():
-    creds = None
-    if os.path.exists(GOOGLE_TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(GOOGLE_TOKEN_PATH, GOOGLE_SCOPES)
-        # If the stored token was issued for a narrower scope set than we now
-        # require (e.g. calendar-only tokens predating the Sheets scope),
-        # force a fresh OAuth flow instead of silently using a token that
-        # would 403 on the new API.
-        if creds and creds.scopes and not set(GOOGLE_SCOPES).issubset(set(creds.scopes)):
-            creds = None
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(GOOGLE_CREDENTIALS_PATH):
-                raise FileNotFoundError(
-                    f"Google OAuth client secrets not found at {GOOGLE_CREDENTIALS_PATH}. "
-                    "Create an OAuth client at console.cloud.google.com (Calendar + Sheets APIs enabled), "
-                    "download the JSON, and save it to that path."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_CREDENTIALS_PATH, GOOGLE_SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(GOOGLE_TOKEN_PATH, "w") as f:
-            f.write(creds.to_json())
-    return creds
-
-
-def _build_calendar_service():
-    return build("calendar", "v3", credentials=_load_google_credentials(), cache_discovery=False)
-
-
-def _build_sheets_service():
-    return build("sheets", "v4", credentials=_load_google_credentials(), cache_discovery=False)
-
-
 async def _run_blocking(fn, *args):
     # asyncio.to_thread was added in Python 3.9; this project runs on 3.8.
     loop = asyncio.get_event_loop()
@@ -296,7 +253,7 @@ async def _get_calendar_service():
     global _calendar_service
     async with _calendar_service_lock:
         if _calendar_service is None:
-            _calendar_service = await _run_blocking(_build_calendar_service)
+            _calendar_service = await _run_blocking(build_calendar_service)
     return _calendar_service
 
 
