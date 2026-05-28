@@ -300,17 +300,29 @@ def _search_calendar_sync(service, start_date: str, end_date: str) -> str:
         maxResults=100,
     ).execute()
 
-    events = []
-    for ev in events_result.get("items", []):
-        events.append({
-            "start": ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date"),
-            "end": ev.get("end", {}).get("dateTime") or ev.get("end", {}).get("date"),
-            "summary": ev.get("summary"),
-            "location": ev.get("location"),
-            "description": ev.get("description"),
-        })
+    items = events_result.get("items", [])
+    if not items:
+        return "<events></events>"
 
-    return json.dumps({"count": len(events), "events": events}, ensure_ascii=False)
+    blocks = []
+    for ev in items:
+        start = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date") or ""
+        end = ev.get("end", {}).get("dateTime") or ev.get("end", {}).get("date") or ""
+        summary = ev.get("summary") or ""
+        location = ev.get("location") or ""
+        description = ev.get("description") or ""
+        blocks.append(
+            "  <event>\n"
+            f"    <start>{start}</start>\n"
+            f"    <end>{end}</end>\n"
+            f"    <summary>{summary}</summary>\n"
+            f"    <location>{location}</location>\n"
+            f"    <description>{description}</description>\n"
+            "  </event>"
+        )
+
+    inner = "\n".join(blocks)
+    return f"<events>\n{inner}\n</events>"
 
 
 def _web_search_sync(query: str) -> str:
