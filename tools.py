@@ -45,8 +45,6 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
 
-TRUNCATION_LIMIT = 6000
-
 
 TOOL_DEFINITIONS = [
     {
@@ -154,12 +152,6 @@ def _parse_iso_date(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d")
 
 
-def _truncate(payload: str) -> str:
-    if len(payload) <= TRUNCATION_LIMIT:
-        return payload
-    return payload[:TRUNCATION_LIMIT] + "...[truncated]"
-
-
 _ATTRIBUTED_BODY_RE = re.compile(rb"\x94\x84.\x2b(.)")
 
 
@@ -174,12 +166,15 @@ def _extract_attributed_body_text(blob: bytes) -> str:
     return blob[start : start + length].decode("utf-8", errors="replace")
 
 
+MESSAGES_MAX_LEN = 20000
+
+
 def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
     _parse_iso_date(start_date)
     _parse_iso_date(end_date)
 
     if not os.path.exists(IMESSAGE_DB_PATH):
-        return json.dumps({"error": f"iMessage database not found at {IMESSAGE_DB_PATH}"})
+        return f"<error>iMessage database not found at {IMESSAGE_DB_PATH}</error>"
 
     like_pattern = f"%{keyword.lower()}%"
     conn = sqlite3.connect(f"file:{IMESSAGE_DB_PATH}?mode=ro", uri=True)
@@ -191,8 +186,7 @@ def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
                 datetime(m.date/1000000000 + strftime('%s', '2001-01-01'), 'unixepoch') AS ts,
                 m.is_from_me,
                 m.text,
-                m.attributedBody,
-                c.chat_identifier
+                m.attributedBody
             FROM message m
             JOIN chat_message_join cmj ON m.rowid = cmj.message_id
             JOIN chat c ON cmj.chat_id = c.rowid
@@ -210,8 +204,11 @@ def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
         conn.close()
 
     kw_lower = keyword.lower()
-    hits = []
-    for ts, is_from_me, text, blob, contact in rows:
+    blocks = []
+    wrapper_overhead = len('<messages incomplete="true">\n\n</messages>')
+    content_len = 0
+    incomplete = False
+    for ts, is_from_me, text, blob in rows:
         if text:
             body = text
         elif blob:
@@ -220,14 +217,27 @@ def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
                 continue
         else:
             continue
-        hits.append({
-            "timestamp": ts,
-            "direction": "sent" if is_from_me else "received",
-            "contact": contact,
-            "text": body,
-        })
 
-    return _truncate(json.dumps({"count": len(hits), "messages": hits}, ensure_ascii=False))
+        direction = "sent" if is_from_me else "received"
+        block = (
+            "  <message>\n"
+            f"    <datetime>{ts}</datetime>\n"
+            f"    <direction>{direction}</direction>\n"
+            f"    <text>{body}</text>\n"
+            "  </message>"
+        )
+        addition = len(block) + (1 if blocks else 0)
+        if wrapper_overhead + content_len + addition > MESSAGES_MAX_LEN:
+            incomplete = True
+            break
+        blocks.append(block)
+        content_len += addition
+
+    attr = ' incomplete="true"' if incomplete else ""
+    if not blocks:
+        return f"<messages{attr}></messages>"
+    inner = "\n".join(blocks)
+    return f"<messages{attr}>\n{inner}\n</messages>"
 
 
 _calendar_service = None
@@ -300,38 +310,38 @@ def _search_calendar_sync(service, start_date: str, end_date: str) -> str:
             "description": ev.get("description"),
         })
 
-    return _truncate(json.dumps({"count": len(events), "events": events}, ensure_ascii=False))
+    return json.dumps({"count": len(events), "events": events}, ensure_ascii=False)
 
 
 def _web_search_sync(query: str) -> str:
     if not PERPLEXITY_API_KEY:
-        return json.dumps({"error": "PERPLEXITY_API_KEY env var not set"})
+        return "<error>PERPLEXITY_API_KEY env var not set</error>"
 
     client = Perplexity(api_key=PERPLEXITY_API_KEY)
-    search = client.search.create(query=[query])
+    search = client.search.create(
+        query=[query],
+        max_results=5,
+        max_tokens_per_page=1024,
+        )
 
     if not search.results:
-        return json.dumps({"count": 0, "results": []})
+        return "<results></results>"
 
-    today = datetime.now().date()
-    results = []
-    for r in search.results:
-        item = {
-            "title": r.title or "",
-            "url": r.url or "",
-            "snippet": getattr(r, "snippet", None) or "",
-        }
-        r_date = getattr(r, "date", None)
-        if r_date:
-            try:
-                d = datetime.strptime(r_date, "%Y-%m-%d").date()
-                item["date"] = r_date
-                item["days_ago"] = (today - d).days
-            except ValueError:
-                item["date"] = r_date
-        results.append(item)
+    blocks = []
+    for i, r in enumerate(search.results, start=1):
+        title = r.title or ""
+        url = r.url or ""
+        snippet = getattr(r, "snippet", None) or ""
+        blocks.append(
+            f'  <result index="{i}">\n'
+            f"    <title>{title}</title>\n"
+            f"    <url>{url}</url>\n"
+            f"    <snippet>{snippet}</snippet>\n"
+            f"  </result>"
+        )
 
-    return _truncate(json.dumps({"count": len(results), "results": results}, ensure_ascii=False))
+    inner = "\n".join(blocks)
+    return f"<results>\n{inner}\n</results>"
 
 
 async def dispatch_tool(name: str, args: dict) -> str:

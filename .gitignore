@@ -5,6 +5,7 @@ transaction_csv_sources.md
 .env
 credentials.json
 token.json
+personal_profile.txt
 
 __pycache__/
 .venv/

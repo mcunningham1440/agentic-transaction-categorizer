@@ -15,12 +15,11 @@ MAX_ROUNDS = 10
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT_TEMPLATE = """
 Your task is to assign a financial transaction into one of the categories listed by the user using the tools available to you.
 You are given the 5 most-similar past transactions in the user message.
 If they clearly point to one category, categorize_transaction immediately.
 If they conflict or are unclear, consult the other tools.
-If a tool response is truncated, narrow the date range or use a more specific keyword.
 When you feel confident you've gathered all the relevant information, commit the final category using categorize_transaction.
 
 Tips on tool usage:
@@ -31,6 +30,8 @@ Tips on tool usage:
 *web_search*
     - Use when the merchant name is unfamiliar and you need to identify what kind of business it is
 
+Personal profile of the user to help disambiguate categories):
+{personal_profile}
 """
 
 
@@ -104,12 +105,13 @@ async def categorize_one(
     transaction: dict,
     archive: pd.DataFrame,
     client: AsyncOpenAI,
+    personal_profile: str,
 ) -> str:
     similar = top_n_similar(transaction["Name"], archive, n=5)
     priming = _build_priming_message(transaction, similar)
 
     input_list = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(personal_profile=personal_profile)},
         {"role": "user", "content": priming},
     ]
 
@@ -163,6 +165,7 @@ async def categorize_dataframe(
     df: pd.DataFrame,
     archive: pd.DataFrame,
     client: AsyncOpenAI,
+    personal_profile: str,
     concurrency: int = 5,
 ) -> list:
     sem = asyncio.Semaphore(concurrency)
@@ -170,7 +173,7 @@ async def categorize_dataframe(
     async def bounded(txn: dict) -> str:
         async with sem:
             try:
-                return await categorize_one(txn, archive, client)
+                return await categorize_one(txn, archive, client, personal_profile)
             except Exception as e:
                 logger.exception("categorize_one failed for %r", txn.get("Name"))
                 return f"ERROR: {type(e).__name__}: {e}"

@@ -14,6 +14,18 @@ from tools import CATEGORIES
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PERSONAL_PROFILE_PATH = os.path.join(SCRIPT_DIR, "personal_profile.txt")
+
+
+def load_personal_profile() -> str:
+    if not os.path.exists(PERSONAL_PROFILE_PATH):
+        raise FileNotFoundError(
+            f"personal_profile.txt not found at {PERSONAL_PROFILE_PATH}. "
+            "Copy personal_profile.sample.txt to personal_profile.txt and fill "
+            "it in with details that help the agent disambiguate categories."
+        )
+    with open(PERSONAL_PROFILE_PATH) as f:
+        return f.read().strip()
 
 
 def find_close_strings(query_string, df, cutoff=0.8):
@@ -166,10 +178,13 @@ async def main():
     all_frames = pd.concat(frames_to_concat)
 
     archive = load_archive()
+    personal_profile = load_personal_profile()
 
     print(f"\nCategorizing {len(all_frames)} transactions via LLM agent (concurrency=5)...")
     client = AsyncOpenAI()
-    categories = await categorize_dataframe(all_frames, archive, client, concurrency=5)
+    categories = await categorize_dataframe(
+        all_frames, archive, client, personal_profile, concurrency=5
+    )
     all_frames["Category"] = categories
 
     all_frames = all_frames.sort_values(by=["Account", "Date"], ascending=[True, False])
