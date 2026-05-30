@@ -151,17 +151,34 @@ def _parse_iso_date(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d")
 
 
-_ATTRIBUTED_BODY_RE = re.compile(rb"\x94\x84.\x2b(.)")
+# Anchors on the typedstream object marker (\x94\x84.) followed by the 0x2b
+# type tag that introduces the inline UTF-8 string written when m.text is NULL.
+_ATTRIBUTED_BODY_RE = re.compile(rb"\x94\x84.\x2b")
 
 
 def _extract_attributed_body_text(blob: bytes) -> str:
-    # Mirrors imessage_search/export_char_ratio.py:6-11 — locates the inline
-    # UTF-8 text inside the NSTypedStream blob used when m.text is NULL.
+    # The attributedBody column holds an NSMutableAttributedString serialized in
+    # Apple's typedstream format. After the 0x2b tag the run length is a
+    # typedstream variable-length integer: a single byte < 0x81 is the length
+    # itself, while a 0x81 tag means the next 2 bytes (little-endian) hold it.
+    # (0x82/0x83 forms exist for larger values but a single message never
+    # reaches them.) The previous version always read one length byte, so it
+    # truncated any message long enough to need the 0x81 form.
     m = _ATTRIBUTED_BODY_RE.search(blob)
     if not m:
         return ""
-    length = m.group(1)[0]
-    start = m.end()
+    i = m.end()
+    if i >= len(blob):
+        return ""
+    tag = blob[i]
+    if tag == 0x81:
+        if i + 3 > len(blob):
+            return ""
+        length = int.from_bytes(blob[i + 1 : i + 3], "little")
+        start = i + 3
+    else:
+        length = tag
+        start = i + 1
     return blob[start : start + length].decode("utf-8", errors="replace")
 
 
@@ -173,7 +190,7 @@ def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
     _parse_iso_date(end_date)
 
     if not os.path.exists(IMESSAGE_DB_PATH):
-        return f"<error>iMessage database not found at {IMESSAGE_DB_PATH}</error>"
+        raise FileNotFoundError(f"iMessage database not found at {IMESSAGE_DB_PATH}")
 
     like_pattern = f"%{keyword.lower()}%"
     conn = sqlite3.connect(f"file:{IMESSAGE_DB_PATH}?mode=ro", uri=True)
@@ -233,10 +250,17 @@ def _search_messages_sync(keyword: str, start_date: str, end_date: str) -> str:
         content_len += addition
 
     attr = ' incomplete="true"' if incomplete else ""
+    advisory = (
+        "\n  <advisory>Results were truncated before all matching messages "
+        "could be returned. Narrow the date range or use a more specific "
+        "keyword and search again.</advisory>"
+        if incomplete
+        else ""
+    )
     if not blocks:
-        return f"<messages{attr}></messages>"
+        return f"<messages{attr}>{advisory}</messages>" if advisory else f"<messages{attr}></messages>"
     inner = "\n".join(blocks)
-    return f"<messages{attr}>\n{inner}\n</messages>"
+    return f"<messages{attr}>\n{inner}{advisory}\n</messages>"
 
 
 _calendar_service = None
