@@ -32,9 +32,13 @@ from openai import AsyncOpenAI
 
 load_dotenv()
 
-from agent import categorize_dataframe
+from agent import categorize_dataframe, compute_cost, MODEL
 from categorize_transactions import load_archive, load_personal_profile
-from tools import CATEGORIES
+from tools import CATEGORIES, TOOL_DEFINITIONS
+
+# Non-terminal tools the agent may consult (categorize_transaction is the
+# terminal commit, not a consultation, so it is excluded from usage stats).
+EVAL_TOOLS = [t["name"] for t in TOOL_DEFINITIONS if t["name"] != "categorize_transaction"]
 
 
 DEFAULT_K = 4
@@ -97,7 +101,23 @@ def per_category_metrics(rows):
     return metrics
 
 
-def write_report(path, *, config, summary, category_metrics, detail_rows):
+def tool_usage_stats(results):
+    """For each non-terminal tool: how many runs invoked it (and how often)."""
+    n = len(results)
+    stats = []
+    for tool in EVAL_TOOLS:
+        runs_invoked = sum(1 for r in results if r.tool_invocations.get(tool, 0) > 0)
+        total = sum(r.tool_invocations.get(tool, 0) for r in results)
+        stats.append({
+            "tool": tool,
+            "runs_invoked": runs_invoked,
+            "pct_runs": _safe_ratio(runs_invoked, n),
+            "total_invocations": total,
+        })
+    return stats
+
+
+def write_report(path, *, config, summary, tool_usage, category_metrics, detail_rows):
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
 
@@ -105,6 +125,12 @@ def write_report(path, *, config, summary, category_metrics, detail_rows):
         w.writerow(["metric", "value"])
         for key, value in {**config, **summary}.items():
             w.writerow([key, value])
+
+        w.writerow([])
+        w.writerow(["## Tool usage"])
+        w.writerow(["tool", "runs_invoked", "pct_runs", "total_invocations"])
+        for t in tool_usage:
+            w.writerow([t["tool"], t["runs_invoked"], t["pct_runs"], t["total_invocations"]])
 
         w.writerow([])
         w.writerow(["## Per-category metrics"])
@@ -192,7 +218,10 @@ async def main():
     def _stat(fn):
         return round(fn(runtimes), 3) if runtimes else "N/A"
 
+    cost = compute_cost(MODEL, total_input, cached_input, total_output)
+
     config = {
+        "model": MODEL,
         "target_year": args.year,
         "k_months": args.k,
         "holdout_fraction": args.frac,
@@ -211,6 +240,9 @@ async def main():
         "total_output_tokens": total_output,
         "reasoning_output_tokens": reasoning_output,
         "answer_output_tokens": total_output - reasoning_output,
+        "input_cost_usd": round(cost["input_cost"], 6),
+        "output_cost_usd": round(cost["output_cost"], 6),
+        "total_cost_usd": round(cost["total_cost"], 6),
         "mean_runtime_seconds": _stat(statistics.mean),
         "median_runtime_seconds": _stat(statistics.median),
         "max_runtime_seconds": _stat(max),
@@ -238,6 +270,7 @@ async def main():
         args.output,
         config=config,
         summary=summary,
+        tool_usage=tool_usage_stats(results),
         category_metrics=category_metrics,
         detail_rows=detail_rows,
     )

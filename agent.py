@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 from openai import AsyncOpenAI
@@ -12,7 +12,35 @@ from tools import CATEGORIES, TOOL_DEFINITIONS, dispatch_tool
 
 
 MODEL = "gpt-5.4-mini"
+REASONING_EFFORT = "low"
 MAX_ROUNDS = 10
+
+MODEL_PRICING = {
+    "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
+}
+
+
+def compute_cost(model: str, input_tokens: int, cached_input_tokens: int,
+                 output_tokens: int) -> dict:
+    """USD cost breakdown for one model's token usage.
+
+    Returns {'input_cost', 'output_cost', 'total_cost'}. Cached input is billed
+    at the cheaper cached rate, the remaining (uncached) input at the input
+    rate, and output (which already includes reasoning tokens) at the output
+    rate. Raises KeyError for a model missing from MODEL_PRICING — cost is never
+    silently zeroed or estimated for an unknown model.
+    """
+    rates = MODEL_PRICING[model]
+    uncached_input = input_tokens - cached_input_tokens
+    input_cost = (
+        uncached_input * rates["input"] + cached_input_tokens * rates["cached_input"]
+    ) / 1_000_000
+    output_cost = output_tokens * rates["output"] / 1_000_000
+    return {
+        "input_cost": input_cost,
+        "output_cost": output_cost,
+        "total_cost": input_cost + output_cost,
+    }
 
 # The agent only ever sees the trailing year of categorized history as
 # examples: for any transaction, the example pool is restricted to the 12
@@ -39,6 +67,7 @@ class CategorizationResult:
     reasoning_tokens: int
     elapsed_seconds: float
     rounds: int
+    tool_invocations: dict = field(default_factory=dict)
     error: str | None = None
 
 
@@ -181,6 +210,7 @@ async def categorize_one(
         "reasoning_tokens": 0,
     }
     rounds = 0
+    tool_counts: dict = {}
 
     def _result(category: str, reasoning: str | None) -> CategorizationResult:
         return CategorizationResult(
@@ -188,6 +218,7 @@ async def categorize_one(
             reasoning=reasoning,
             elapsed_seconds=time.perf_counter() - start,
             rounds=rounds,
+            tool_invocations=dict(tool_counts),
             **usage,
         )
 
@@ -207,6 +238,7 @@ async def categorize_one(
             input=input_list,
             tools=TOOL_DEFINITIONS,
             tool_choice="required",
+            reasoning={"effort": REASONING_EFFORT},
         )
         _accumulate_usage(usage, resp.usage)
         input_list += _serialize_output(resp.output)
@@ -215,6 +247,8 @@ async def categorize_one(
             if call["name"] == "categorize_transaction":
                 args = json.loads(call["arguments"])
                 return _result(args["category"], args.get("reasoning"))
+
+            tool_counts[call["name"]] = tool_counts.get(call["name"], 0) + 1
 
             try:
                 args = json.loads(call["arguments"] or "{}")
@@ -239,6 +273,7 @@ async def categorize_one(
         input=input_list,
         tools=TOOL_DEFINITIONS,
         tool_choice={"type": "function", "name": "categorize_transaction"},
+        reasoning={"effort": REASONING_EFFORT},
     )
     _accumulate_usage(usage, final.usage)
     for call in _extract_function_calls(final.output):

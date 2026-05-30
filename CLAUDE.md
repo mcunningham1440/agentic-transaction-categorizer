@@ -5,7 +5,7 @@ LLM pipeline that ingests monthly transaction CSVs from multiple banks (Chase, A
 ## Run
 
 - End-to-end: `.venv/bin/python categorize_transactions.py` — prompts for month/year, reads `data/<m>-<y>/*.csv`, writes `categorized_transactions.csv`.
-- Held-out eval: `.venv/bin/python agent_eval.py [--k 4] [--year 2026] [--frac 0.25]` — deterministically holds out a fraction of the first k months' archived transactions, re-categorizes them with those rows hidden from the example pool, and writes `agent_eval_report.csv` (token cost, runtime, accuracy, per-category sensitivity/precision, per-transaction breakdown). Makes live API + tool calls.
+- Held-out eval: `.venv/bin/python agent_eval.py [--k 4] [--year 2026] [--frac 0.25]` — deterministically holds out a fraction of the first k months' archived transactions, re-categorizes them with those rows hidden from the example pool, and writes `agent_eval_report.csv` (token counts, USD cost, runtime, accuracy, per-tool invocation rate, per-category sensitivity/precision, per-transaction breakdown). Makes live API + tool calls. Costs come from `agent.MODEL_PRICING` — add an entry there when changing `agent.MODEL`, or `compute_cost` raises.
 - Smoke-test the archive fetch alone: `.venv/bin/python sheets_archive.py`.
 - No automated tests. Exercise changes through one of the entry points above.
 

@@ -1,6 +1,7 @@
 .DS_Store
 archive.csv
 categorized_transactions.csv
+agent_eval_report.csv
 transaction_csv_sources.md
 .env
 credentials.json
