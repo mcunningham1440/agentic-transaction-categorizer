@@ -37,9 +37,7 @@ CATEGORIES = (
     "Extra income",
 )
 
-IMESSAGE_DB_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "imessage_search", "chat.db")
-)
+IMESSAGE_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
 
@@ -276,7 +274,6 @@ _calendar_service_lock = asyncio.Lock()
 
 
 async def _run_blocking(fn, *args):
-    # asyncio.to_thread was added in Python 3.9; this project runs on 3.8.
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: fn(*args))
 

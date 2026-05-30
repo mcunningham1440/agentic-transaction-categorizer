@@ -14,6 +14,7 @@ LLM pipeline that ingests monthly transaction CSVs from multiple banks (Chase, A
 - `personal_profile.txt` — free-form categorization context fed into the agent's system prompt. Template: `personal_profile.sample.txt`.
 - `credentials.json` + `token.json` — Google OAuth (read-only Calendar + Sheets).
 - Monthly bank CSVs in `data/<month>-<year>/` following the filename-prefix convention in `transaction_csv_sources.md`.
+- **Full Disk Access** for the launching app (Terminal/iTerm/VS Code). The `search_messages` tool reads `~/Library/Messages/chat.db` (`IMESSAGE_DB_PATH` in `tools.py`); without FDA on the app that starts the process, that read fails. Grant it to the app bundle, not to `python`, then relaunch.
 
 ## Non-obvious
 
