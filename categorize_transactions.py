@@ -51,9 +51,27 @@ def find_close_strings(query_string, df, cutoff=0.8):
 
 # Rows in any category not present in CATEGORIES are silently dropped from the
 # similarity pool — this is intentional, since "Income" / "Internal transfer"
-# etc. are not spending categories the agent should learn from.
+# etc. are not spending categories the agent should learn from. The same filter
+# also drops rows from prior years whose category has since been retired: the
+# category list evolves year to year, so the past-year sheet may contain labels
+# that no longer exist in CATEGORIES, and those rows are excluded here.
 def load_archive() -> pd.DataFrame:
-    archive = load_archive_from_sheets()
+    # Combine the current- and prior-year archive sheets so the agent always has
+    # a full trailing year of history available (the per-transaction 12-month
+    # window is applied later, inside agent.categorize_one). PAST_YEAR is
+    # required, not optional: without it, January/early-year transactions would
+    # have an empty example pool. A missing ID raises rather than degrading.
+    past_year_id = os.environ.get("PAST_YEAR_ARCHIVE_SHEET_ID", "")
+    if not past_year_id:
+        raise RuntimeError(
+            "PAST_YEAR_ARCHIVE_SHEET_ID env var is not set. It supplies the "
+            "trailing-year history the agent needs for early-year transactions. "
+            "Add the prior year's archive spreadsheet ID to .env."
+        )
+
+    current = load_archive_from_sheets()  # reads CURRENT_YEAR_ARCHIVE_SHEET_ID
+    past = load_archive_from_sheets(past_year_id)
+    archive = pd.concat([current, past], ignore_index=True)
     archive = archive[archive["Category"].isin(CATEGORIES)].reset_index(drop=True)
     return archive
 
@@ -183,10 +201,14 @@ async def main():
 
     print(f"\nCategorizing {len(all_frames)} transactions via LLM agent (concurrency=5)...")
     client = AsyncOpenAI()
-    categories = await categorize_dataframe(
+    results = await categorize_dataframe(
         all_frames, archive, client, personal_profile, concurrency=5
     )
-    all_frames["Category"] = categories
+    # Preserve prior behavior: failed categorizations land in the CSV as
+    # "ERROR: ..." strings rather than aborting the whole run.
+    all_frames["Category"] = [
+        r.category if r.error is None else f"ERROR: {r.error}" for r in results
+    ]
 
     all_frames = all_frames.sort_values(by=["Account", "Date"], ascending=[True, False])
 
