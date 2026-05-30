@@ -290,7 +290,7 @@ async def categorize_dataframe(
     archive: pd.DataFrame,
     client: AsyncOpenAI,
     personal_profile: str,
-    concurrency: int = 5,
+    concurrency: int = 20,
 ) -> list[CategorizationResult]:
     sem = asyncio.Semaphore(concurrency)
 

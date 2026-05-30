@@ -199,10 +199,10 @@ async def main():
     archive = load_archive()
     personal_profile = load_personal_profile()
 
-    print(f"\nCategorizing {len(all_frames)} transactions via LLM agent (concurrency=5)...")
+    print(f"\nCategorizing {len(all_frames)} transactions via LLM agent...")
     client = AsyncOpenAI()
     results = await categorize_dataframe(
-        all_frames, archive, client, personal_profile, concurrency=5
+        all_frames, archive, client, personal_profile
     )
     # Preserve prior behavior: failed categorizations land in the CSV as
     # "ERROR: ..." strings rather than aborting the whole run.
