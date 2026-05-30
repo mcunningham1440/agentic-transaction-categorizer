@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import sqlite3
 from datetime import datetime, time, timezone
 
@@ -151,23 +150,32 @@ def _parse_iso_date(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d")
 
 
-# Anchors on the typedstream object marker (\x94\x84.) followed by the 0x2b
-# type tag that introduces the inline UTF-8 string written when m.text is NULL.
-_ATTRIBUTED_BODY_RE = re.compile(rb"\x94\x84.\x2b")
+_NSSTRING_MARKER = b"NSString"
 
 
 def _extract_attributed_body_text(blob: bytes) -> str:
     # The attributedBody column holds an NSMutableAttributedString serialized in
-    # Apple's typedstream format. After the 0x2b tag the run length is a
-    # typedstream variable-length integer: a single byte < 0x81 is the length
-    # itself, while a 0x81 tag means the next 2 bytes (little-endian) hold it.
-    # (0x82/0x83 forms exist for larger values but a single message never
-    # reaches them.) The previous version always read one length byte, so it
-    # truncated any message long enough to need the 0x81 form.
-    m = _ATTRIBUTED_BODY_RE.search(blob)
-    if not m:
+    # Apple's typedstream format. The message text is a length-prefixed UTF-8 run
+    # that follows the NSString class marker and a 0x2b ("+") type tag. We anchor
+    # on the NSString marker rather than the surrounding object bytes: those
+    # bytes include a typedstream back-reference index (0x94, 0x95, ...) that
+    # increments as the stream reuses the class, so anchoring on a fixed value
+    # like \x94 silently dropped every message that happened to land on a
+    # different index (~13-32% of texts in practice).
+    #
+    # After the 0x2b tag the run length is a typedstream variable-length integer:
+    # a single byte < 0x81 is the length itself, while a 0x81 tag means the next
+    # 2 bytes (little-endian) hold it. (0x82/0x83 forms exist for larger values
+    # but a single message never reaches them.)
+    marker = blob.find(_NSSTRING_MARKER)
+    if marker == -1:
         return ""
-    i = m.end()
+    # First 0x2b after the marker; +8 skips the marker so a stray match inside
+    # the literal "NSString" can't be picked up (there isn't one, but be exact).
+    plus = blob.find(b"\x2b", marker + len(_NSSTRING_MARKER))
+    if plus == -1:
+        return ""
+    i = plus + 1
     if i >= len(blob):
         return ""
     tag = blob[i]
