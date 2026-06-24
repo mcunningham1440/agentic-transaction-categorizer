@@ -230,9 +230,11 @@ async def main():
     for account, count in account_counts.items():
         print(f"  {account}: {count}")
 
-    # Open the results CSV and the current-year archive sheet for review/entry.
-    # macOS `open` routes files to the default app and URLs to the browser.
+    # Open the results CSV, the current-year archive sheet, and Amazon order
+    # history for review/entry. macOS `open` routes files to the default app
+    # and URLs to the browser.
     subprocess.run(["open", output_path], check=False)
+    subprocess.run(["open", "https://www.amazon.com/gp/css/order-history"], check=False)
 
     current_year_sheet_id = os.environ.get("CURRENT_YEAR_ARCHIVE_SHEET_ID", "")
     if current_year_sheet_id:
