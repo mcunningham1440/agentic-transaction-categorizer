@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 import pandas as pd
 from openai import AsyncOpenAI
 
-from archive_index import top_n_similar
-from tools import CATEGORIES, CATEGORY_INSTRUCTIONS, TOOL_DEFINITIONS, dispatch_tool
+from categorizer.archive.index import top_n_similar
+from categorizer.categories import CATEGORIES, CATEGORY_INSTRUCTIONS
+from categorizer.tools import TOOL_DEFINITIONS, dispatch_tool
 
 
 MODEL = "gpt-5.4-mini"

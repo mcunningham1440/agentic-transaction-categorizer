@@ -2,9 +2,8 @@ import os
 import re
 
 import pandas as pd
-from dotenv import load_dotenv
 
-from google_auth import build_sheets_service
+from categorizer.archive.google_auth import build_sheets_service
 
 
 MONTH_NAMES = (
@@ -107,7 +106,7 @@ def load_archive_from_sheets(spreadsheet_id: str = None) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    # .env is loaded by categorizer/__init__ on package import.
     df = load_archive_from_sheets()
     print(df.head(10))
     print(f"\nTotal rows: {len(df)}")

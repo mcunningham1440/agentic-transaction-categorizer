@@ -1,12 +1,15 @@
 .DS_Store
 archive.csv
-categorized_transactions.csv
-agent_eval_report.csv
-transaction_csv_sources.md
-.env
-credentials.json
-token.json
-categories.yaml
+
+# Generated artifacts
+output/
+
+# Per-machine config & secrets (templates *.sample are committed)
+config/.env
+config/credentials.json
+config/token.json
+config/categories.yaml
+config/transaction_csv_sources.md
 
 __pycache__/
 .venv/

@@ -6,9 +6,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from categorizer.paths import CREDENTIALS_PATH, TOKEN_PATH
 
-CREDENTIALS_PATH = os.path.join(os.path.dirname(__file__), "credentials.json")
-TOKEN_PATH = os.path.join(os.path.dirname(__file__), "token.json")
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",

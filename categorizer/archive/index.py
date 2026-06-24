@@ -5,7 +5,7 @@ from Levenshtein import distance as levenshtein_distance
 def top_n_similar(query_name: str, archive: pd.DataFrame, n: int = 5) -> pd.DataFrame:
     """Return the top-n archive rows most similar to query_name by Levenshtein.
 
-    Mirrors the similarity formula from categorize_transactions.find_close_strings
+    Mirrors the similarity formula from pipeline.find_close_strings
     (1 - distance/max_length), but ranks unconditionally and returns the top n
     rather than filtering by a cutoff.
     """
