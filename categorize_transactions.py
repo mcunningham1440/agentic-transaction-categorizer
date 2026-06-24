@@ -209,10 +209,17 @@ async def main():
     all_frames["Category"] = [
         r.category if r.error is None else f"ERROR: {r.error}" for r in results
     ]
+    # Mirror eval's rationale column: stated reasoning on success, the error on
+    # failure. A None reasoning (e.g. agent returned a category without one)
+    # becomes an empty string rather than the literal "None".
+    all_frames["Reasoning"] = [
+        (r.reasoning or "") if r.error is None else f"ERROR: {r.error}"
+        for r in results
+    ]
 
     all_frames = all_frames.sort_values(by=["Account", "Date"], ascending=[True, False])
 
-    all_frames = all_frames[["Date", "Name", "Amount", "Category", "Account"]]
+    all_frames = all_frames[["Date", "Name", "Amount", "Category", "Account", "Reasoning"]]
 
     all_frames.to_csv(os.path.join(SCRIPT_DIR, "categorized_transactions.csv"), index=False)
 
