@@ -6,3 +6,4 @@ google-auth-oauthlib
 google-auth-httplib2
 perplexityai>=0.20.0
 python-dotenv
+PyYAML

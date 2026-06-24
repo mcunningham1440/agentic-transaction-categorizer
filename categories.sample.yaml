@@ -1,0 +1,104 @@
+# Authoritative list of spending categories. (TEMPLATE — copy this to
+# categories.yaml, which is gitignored, and fill in your own instructions.)
+#
+# Each entry has:
+#   name:         the exact category string. This is the canonical value the
+#                 agent must return AND the value matched against the archive
+#                 sheet's "Category" column, so renaming here orphans existing
+#                 archive rows (they get dropped from the similarity pool).
+#   instructions: OPTIONAL per-category guidance for the agent on how to handle
+#                 this category. Leave as "" for none. Multi-line is fine via `|`.
+#                 Put merchant- and rule-specific guidance under the category it
+#                 resolves to (e.g. "Payments to The Fynn for ~$4200 belong
+#                 here" under Rent). The examples below are illustrative.
+#
+# Order is preserved when the list is shown to the agent.
+
+- name: "Other bills"
+  instructions: |
+    Internet (Comcast), electricity (Ameren), and phone (T-Mobile) bills belong
+    here. The gym membership at Anytime Fitness (~$50/mo) also belongs here.
+
+- name: "Dining alone"
+  instructions: ""
+
+- name: "Dining social"
+  instructions: ""
+
+- name: "Cafeteria"
+  instructions: |
+    Lunch charges from "Acme Cafe" (the office cafeteria) belong here, not
+    Dining alone.
+
+- name: "Gas"
+  instructions: |
+    Gas is usually purchased from the Shell near home.
+
+- name: "Groceries"
+  instructions: |
+    Groceries are primarily from Trader Joe's and Jewel Osco.
+
+- name: "Social recreation"
+  instructions: ""
+
+- name: "Solo recreation"
+  instructions: ""
+
+- name: "Drinks"
+  instructions: ""
+
+- name: "Parking"
+  instructions: ""
+
+- name: "Tolls"
+  instructions: ""
+
+- name: "Gifts"
+  instructions: ""
+
+- name: "Clothes, acessories, haircuts, etc."
+  instructions: ""
+
+- name: "Healthcare"
+  instructions: ""
+
+- name: "Education and career"
+  instructions: ""
+
+- name: "Public transit + rideshare"
+  instructions: |
+    Occasional rideshare to the airport (Uber/Lyft) belongs here.
+
+- name: "Car maintenance"
+  instructions: ""
+
+- name: "Miscellaneous"
+  instructions: ""
+
+- name: "Rent"
+  instructions: |
+    Rent is paid monthly to Maple Property Mgmt.
+
+- name: "Vacation"
+  instructions: ""
+
+- name: "Budgeted exceptional expenses"
+  instructions: ""
+
+- name: "Loan repayment"
+  instructions: ""
+
+- name: "Internal transfer"
+  instructions: |
+    Transfers between Chase checking and Ally savings belong here. NOTE: Venmo
+    to/from the user's partner (Jane Smith) for shared expenses like groceries
+    or dining should usually inherit the underlying category instead of being
+    marked Internal transfer.
+
+- name: "Income"
+  instructions: |
+    Anything from "Acme Corp Payroll" belongs here.
+
+- name: "Extra income"
+  instructions: |
+    The annual bonus belongs here.

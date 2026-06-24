@@ -6,7 +6,7 @@ transaction_csv_sources.md
 .env
 credentials.json
 token.json
-personal_profile.txt
+categories.yaml
 
 __pycache__/
 .venv/

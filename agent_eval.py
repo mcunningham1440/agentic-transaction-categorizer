@@ -33,7 +33,7 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 from agent import categorize_dataframe, compute_cost, MODEL
-from categorize_transactions import load_archive, load_personal_profile
+from categorize_transactions import load_archive
 from tools import CATEGORIES, TOOL_DEFINITIONS
 
 # Non-terminal tools the agent may consult (categorize_transaction is the
@@ -163,7 +163,6 @@ async def main():
     args = parser.parse_args()
 
     archive = load_archive()
-    personal_profile = load_personal_profile()
 
     # Rows with an unparseable/blank Date can't be placed in a month, so they
     # can be neither held out nor windowed. Drop them outright and report how
@@ -194,7 +193,7 @@ async def main():
 
     client = AsyncOpenAI()
     results = await categorize_dataframe(
-        held_out, pool_archive, client, personal_profile,
+        held_out, pool_archive, client,
         concurrency=args.concurrency,
     )
 

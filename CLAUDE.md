@@ -12,7 +12,7 @@ LLM pipeline that ingests monthly transaction CSVs from multiple banks (Chase, A
 ## Required setup (per machine, all gitignored)
 
 - `.env` — `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `VENMO_ACCOUNT_HOLDER_NAME`, `CURRENT_YEAR_ARCHIVE_SHEET_ID`, `PAST_YEAR_ARCHIVE_SHEET_ID`. Template: `.env.sample`.
-- `personal_profile.txt` — free-form categorization context fed into the agent's system prompt. Template: `personal_profile.sample.txt`.
+- `categories.yaml` — authoritative category list plus optional per-category `instructions`. Template: `categories.sample.yaml`.
 - `credentials.json` + `token.json` — Google OAuth (read-only Calendar + Sheets).
 - Monthly bank CSVs in `data/<month>-<year>/` following the filename-prefix convention in `transaction_csv_sources.md`.
 - **Full Disk Access** for the launching app (Terminal/iTerm/VS Code). The `search_messages` tool reads `~/Library/Messages/chat.db` (`IMESSAGE_DB_PATH` in `tools.py`); without FDA on the app that starts the process, that read fails. Grant it to the app bundle, not to `python`, then relaunch.
@@ -20,7 +20,7 @@ LLM pipeline that ingests monthly transaction CSVs from multiple banks (Chase, A
 ## Non-obvious
 
 - **OpenAI Responses API**, not Chat Completions. `agent.py` uses `client.responses.create(...)` with a custom output-extraction protocol (see `_extract_function_calls`, `_serialize_output`). Verify Responses API docs before translating to a different surface.
-- **`CATEGORIES` tuple in `tools.py` is the authoritative category list.** Archive rows whose category isn't in the tuple are silently dropped from the similarity pool — intentional, see comment at `categorize_transactions.load_archive`. This also retires prior-year categories that no longer exist.
+- **`categories.yaml` is the authoritative category list (gitignored; template `categories.sample.yaml`).** `tools._load_categories()` reads it at import into `CATEGORIES` (tuple of names) and `CATEGORY_INSTRUCTIONS` (`{name: optional per-category guidance}`); the loader raises on a missing/malformed file or duplicate names rather than degrading. Each entry's `instructions` (optional, defaults to `""`) is appended to that category's bullet in the agent prompt. Archive rows whose category isn't in `CATEGORIES` are silently dropped from the similarity pool — intentional, see comment at `categorize_transactions.load_archive`. This also retires prior-year categories that no longer exist. Renaming a `name` orphans existing archive rows, so the `acessories` typo is kept deliberately.
 - **Two archive sheets, combined.** `load_archive()` concatenates `CURRENT_YEAR_ARCHIVE_SHEET_ID` and `PAST_YEAR_ARCHIVE_SHEET_ID`; both are required (the prior-year sheet supplies the trailing-year history early-year transactions need).
 - **Trailing 12-month example window.** `agent.categorize_one` restricts each transaction's example pool to the 12 calendar months strictly before its own month (`ARCHIVE_WINDOW_MONTHS`), so the agent never sees same-month/future history. Applies to both production and eval.
 - **Archive `Date` is a Sheets serial number.** `sheets_archive.py` reads `A33:E` and converts column A from a days-since-1899-12-30 serial (because of `UNFORMATTED_VALUE`) to a datetime; unparseable dates become `NaT`.

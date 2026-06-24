@@ -4,38 +4,52 @@ import os
 import sqlite3
 from datetime import datetime, time, timezone
 
+import yaml
 from perplexity import Perplexity
 
 from google_auth import build_calendar_service
 
 
-CATEGORIES = (
-    "Other bills",
-    "Dining alone",
-    "Dining social",
-    "Cafeteria",
-    "Gas",
-    "Groceries",
-    "Social recreation",
-    "Solo recreation",
-    "Drinks",
-    "Parking",
-    "Tolls",
-    "Gifts",
-    "Clothes, acessories, haircuts, etc.",
-    "Healthcare",
-    "Education and career",
-    "Public transit + rideshare",
-    "Car maintenance",
-    "Miscellaneous",
-    "Rent",
-    "Vacation",
-    "Budgeted exceptional expenses",
-    "Loan repayment",
-    "Internal transfer",
-    "Income",
-    "Extra income",
-)
+CATEGORIES_PATH = os.path.join(os.path.dirname(__file__), "categories.yaml")
+
+
+def _load_categories(path: str) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Load the authoritative category list and per-category instructions from
+    categories.yaml. Returns (names tuple, {name: instructions}).
+
+    Raises rather than degrading to a partial/empty list: a malformed or
+    missing file is a setup error, not something to silently work around.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Category definitions not found at {path}. Copy categories.sample.yaml "
+            "to categories.yaml and fill in any per-category instructions. This file "
+            "is required; it holds the authoritative category list."
+        )
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{path} must contain a non-empty YAML list of categories.")
+
+    names: list[str] = []
+    instructions: dict[str, str] = {}
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict) or "name" not in entry:
+            raise ValueError(f"{path} entry #{i + 1} is missing a 'name' field.")
+        name = entry["name"]
+        # Absent or null instructions default to "" (i.e. no special handling),
+        # which is the intended "optional" behavior — the field can be omitted.
+        instr = (entry.get("instructions") or "").strip()
+        names.append(name)
+        instructions[name] = instr
+
+    if len(set(names)) != len(names):
+        raise ValueError(f"{path} contains duplicate category names.")
+
+    return tuple(names), instructions
+
+
+CATEGORIES, CATEGORY_INSTRUCTIONS = _load_categories(CATEGORIES_PATH)
 
 IMESSAGE_DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 

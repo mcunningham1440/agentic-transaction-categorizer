@@ -8,7 +8,7 @@ import pandas as pd
 from openai import AsyncOpenAI
 
 from archive_index import top_n_similar
-from tools import CATEGORIES, TOOL_DEFINITIONS, dispatch_tool
+from tools import CATEGORIES, CATEGORY_INSTRUCTIONS, TOOL_DEFINITIONS, dispatch_tool
 
 
 MODEL = "gpt-5.4-mini"
@@ -108,7 +108,7 @@ def _accumulate_usage(acc: dict, usage) -> None:
     acc["reasoning_tokens"] += getattr(out_details, "reasoning_tokens", 0) or 0
 
 
-SYSTEM_PROMPT_TEMPLATE = """
+SYSTEM_PROMPT = """
 Your task is to assign a financial transaction into one of the categories listed by the user using the tools available to you.
 You are given the 5 most-similar past transactions in the user message.
 If they clearly point to one category, categorize_transaction immediately.
@@ -123,8 +123,8 @@ Tips on tool usage:
 *web_search*
     - Use when the merchant name is unfamiliar and you need to identify what kind of business it is
 
-Personal profile of the user to help disambiguate categories):
-{personal_profile}
+Some categories carry their own handling instructions; these appear after the
+category name in the list shown to you. Follow them.
 """
 
 
@@ -140,7 +140,15 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
             )
         similar_block = "\n".join(lines)
 
-    categories_block = "\n".join(f"  - {c}" for c in CATEGORIES)
+    cat_lines = []
+    for c in CATEGORIES:
+        instr = CATEGORY_INSTRUCTIONS.get(c, "")
+        if instr:
+            # Indent any wrapped/multi-line instructions under the bullet.
+            cat_lines.append(f"  - {c}: {instr.replace(chr(10), chr(10) + '      ')}")
+        else:
+            cat_lines.append(f"  - {c}")
+    categories_block = "\n".join(cat_lines)
 
     return (
         "Transaction:\n"
@@ -200,7 +208,6 @@ async def categorize_one(
     transaction: dict,
     archive: pd.DataFrame,
     client: AsyncOpenAI,
-    personal_profile: str,
 ) -> CategorizationResult:
     start = time.perf_counter()
     usage = {
@@ -227,7 +234,7 @@ async def categorize_one(
     priming = _build_priming_message(transaction, similar)
 
     input_list = [
-        {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(personal_profile=personal_profile)},
+        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": priming},
     ]
 
@@ -289,7 +296,6 @@ async def categorize_dataframe(
     df: pd.DataFrame,
     archive: pd.DataFrame,
     client: AsyncOpenAI,
-    personal_profile: str,
     concurrency: int = 20,
 ) -> list[CategorizationResult]:
     sem = asyncio.Semaphore(concurrency)
@@ -297,7 +303,7 @@ async def categorize_dataframe(
     async def bounded(txn: dict) -> CategorizationResult:
         async with sem:
             try:
-                return await categorize_one(txn, archive, client, personal_profile)
+                return await categorize_one(txn, archive, client)
             except Exception as e:
                 logger.exception("categorize_one failed for %r", txn.get("Name"))
                 return CategorizationResult(
