@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 from datetime import datetime
 
 import pandas as pd
@@ -221,12 +222,28 @@ async def main():
 
     all_frames = all_frames[["Date", "Name", "Amount", "Category", "Account", "Reasoning"]]
 
-    all_frames.to_csv(os.path.join(SCRIPT_DIR, "categorized_transactions.csv"), index=False)
+    output_path = os.path.join(SCRIPT_DIR, "categorized_transactions.csv")
+    all_frames.to_csv(output_path, index=False)
 
     print("\nTransactions per account:")
     account_counts = all_frames["Account"].value_counts(dropna=False)
     for account, count in account_counts.items():
         print(f"  {account}: {count}")
+
+    # Open the results CSV and the current-year archive sheet for review/entry.
+    # macOS `open` routes files to the default app and URLs to the browser.
+    subprocess.run(["open", output_path], check=False)
+
+    current_year_sheet_id = os.environ.get("CURRENT_YEAR_ARCHIVE_SHEET_ID", "")
+    if current_year_sheet_id:
+        subprocess.run(
+            ["open", f"https://docs.google.com/spreadsheets/d/{current_year_sheet_id}/edit"],
+            check=False,
+        )
+    else:
+        # Shouldn't happen: load_archive() already required this env var and
+        # would have raised earlier. Warn rather than fail at the very end.
+        print("CURRENT_YEAR_ARCHIVE_SHEET_ID not set; skipping archive sheet open.")
 
 
 if __name__ == "__main__":
