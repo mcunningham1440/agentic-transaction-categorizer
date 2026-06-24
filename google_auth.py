@@ -1,5 +1,6 @@
 import os
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -25,9 +26,20 @@ def load_credentials():
         if creds and creds.scopes and not set(SCOPES).issubset(set(creds.scopes)):
             creds = None
     if not creds or not creds.valid:
+        refreshed = False
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+                refreshed = True
+            except RefreshError:
+                # The stored refresh token was revoked or expired (e.g. OAuth
+                # clients in "Testing" status expire refresh tokens after 7
+                # days). Discard the dead token and fall through to a fresh
+                # browser flow instead of crashing on invalid_grant.
+                if os.path.exists(TOKEN_PATH):
+                    os.remove(TOKEN_PATH)
+                creds = None
+        if not refreshed:
             if not os.path.exists(CREDENTIALS_PATH):
                 raise FileNotFoundError(
                     f"Google OAuth client secrets not found at {CREDENTIALS_PATH}. "
