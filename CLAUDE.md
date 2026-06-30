@@ -32,6 +32,7 @@ submodule reads `os.environ`. Subpackages: `categorizer/archive/`
 - `config/credentials.json` + `config/token.json` — Google OAuth (read-only Calendar + Sheets).
 - Monthly bank CSVs in `data/<month>-<year>/` following the filename-prefix convention in `config/transaction_csv_sources.md`.
 - **Full Disk Access** for the launching app (Terminal/iTerm/VS Code). The `search_messages` tool reads `~/Library/Messages/chat.db` (`IMESSAGE_DB_PATH` in `categorizer/tools/messages.py`); without FDA on the app that starts the process, that read fails. Grant it to the app bundle, not to `python`, then relaunch.
+- **`langsmith` MCP server (for querying LangSmith from Claude Code, not used by the pipeline).** Defined in `.mcp.json` as a stdio server running `uvx langsmith-mcp-server`, with `LANGSMITH_API_KEY` passed via `${LANGSMITH_API_KEY}` expansion. Claude Code expands that from the **launch environment**, not from `config/.env`, so the var must be exported in the shell that starts Claude Code — e.g. `export $(grep -v '^#' config/.env | xargs)` before launching, or add the key to your shell profile. If it's unset the server starts with an empty key and LangSmith calls 401. Requires `uvx` (from `uv`) on `PATH`.
 
 ## Non-obvious
 
