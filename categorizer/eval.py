@@ -34,11 +34,11 @@ from categorizer.agent import categorize_dataframe, compute_cost, MODEL
 from categorizer.categories import CATEGORIES
 from categorizer.paths import OUTPUT_DIR
 from categorizer.pipeline import load_archive
-from categorizer.tools import TOOL_DEFINITIONS
+from categorizer.tools import TOOL_NAMES
 
-# Non-terminal tools the agent may consult (categorize_transaction is the
-# terminal commit, not a consultation, so it is excluded from usage stats).
-EVAL_TOOLS = [t["name"] for t in TOOL_DEFINITIONS if t["name"] != "categorize_transaction"]
+# Non-terminal tools the agent may consult. The terminal commit is now
+# structured output rather than a tool, so TOOL_NAMES already excludes it.
+EVAL_TOOLS = list(TOOL_NAMES)
 
 
 DEFAULT_K = 4

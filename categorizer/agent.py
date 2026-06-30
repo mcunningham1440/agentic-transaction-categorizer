@@ -1,15 +1,19 @@
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Literal
 
 import pandas as pd
+from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
+from langgraph.errors import GraphRecursionError
 from openai import AsyncOpenAI
+from pydantic import Field, create_model
 
 from categorizer.archive.index import top_n_similar
 from categorizer.categories import CATEGORIES, CATEGORY_INSTRUCTIONS
-from categorizer.tools import TOOL_DEFINITIONS, dispatch_tool
+from categorizer.tools import AGENT_TOOLS
 
 
 MODEL = "gpt-5.4-mini"
@@ -89,32 +93,51 @@ def _trailing_window(archive: pd.DataFrame, txn_date) -> pd.DataFrame:
     return archive[mask]
 
 
-def _accumulate_usage(acc: dict, usage) -> None:
-    """Add one response's token usage into the running accumulator dict.
+def _aggregate_run(messages) -> tuple[dict, dict, int]:
+    """Sum token usage and tool invocations across one agent run's messages.
 
-    `usage` is present on every successful Responses API result. The nested
-    `*_tokens_details` sub-fields (cached / reasoning) legitimately default to 0
-    when the API omits them (no cache hit / no reasoning tokens) — that is a
-    real zero, not a masked error. A missing top-level `usage` is unexpected and
-    is logged rather than silently counted as zero.
+    LangChain attaches per-call token counts to each AIMessage's
+    `usage_metadata` (input/output totals plus `input_token_details.cache_read`
+    and `output_token_details.reasoning`). Summing over every AIMessage captures
+    all model calls in the loop, including the final structured-output call.
+
+    `rounds` is the number of model calls (AIMessages carrying usage_metadata),
+    the LangChain analog of the old per-request round count.
+
+    Note: the nested detail fields default to 0 via `.get(..., 0)` when the
+    provider omits them (no cache hit / no reasoning tokens) — a real zero, not a
+    masked error; this matches the previous Responses-API behavior. These counts
+    feed compute_cost(), so an omitted detail field undercounts rather than
+    erroring.
     """
-    if usage is None:
-        logger.warning("response had no usage object; token counts may be undercounted")
-        return
-    acc["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
-    acc["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
-    in_details = getattr(usage, "input_tokens_details", None)
-    out_details = getattr(usage, "output_tokens_details", None)
-    acc["cached_input_tokens"] += getattr(in_details, "cached_tokens", 0) or 0
-    acc["reasoning_tokens"] += getattr(out_details, "reasoning_tokens", 0) or 0
+    usage = {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+    }
+    tool_counts: dict = {}
+    rounds = 0
+    for m in messages:
+        um = getattr(m, "usage_metadata", None)
+        if um:
+            rounds += 1
+            usage["input_tokens"] += um.get("input_tokens", 0) or 0
+            usage["output_tokens"] += um.get("output_tokens", 0) or 0
+            usage["cached_input_tokens"] += (um.get("input_token_details") or {}).get("cache_read", 0) or 0
+            usage["reasoning_tokens"] += (um.get("output_token_details") or {}).get("reasoning", 0) or 0
+        for call in getattr(m, "tool_calls", None) or []:
+            name = call.get("name")
+            tool_counts[name] = tool_counts.get(name, 0) + 1
+    return usage, tool_counts, rounds
 
 
 SYSTEM_PROMPT = """
 Your task is to assign a financial transaction into one of the categories listed by the user using the tools available to you.
 You are given the 5 most-similar past transactions in the user message.
-If they clearly point to one category, categorize_transaction immediately.
+If they clearly point to one category, give your final answer immediately.
 If they conflict or are unclear, consult the other tools.
-When you feel confident you've gathered all the relevant information, commit the final category using categorize_transaction.
+When you feel confident you've gathered all the relevant information, respond with the final category and a brief justification.
 
 Tips on tool usage:
 *search_messages*
@@ -127,6 +150,37 @@ Tips on tool usage:
 Some categories carry their own handling instructions; these appear after the
 category name in the list shown to you. Follow them.
 """
+
+
+# Structured-output schema the agent commits its answer to (replaces the old
+# terminal `categorize_transaction` tool). The category is constrained to the
+# authoritative CATEGORIES at import; `_validate_category` re-checks it as a
+# belt-and-suspenders guard.
+Categorization = create_model(
+    "Categorization",
+    category=(
+        Literal[tuple(CATEGORIES)],
+        Field(description="The chosen category. Must be one of the listed values"),
+    ),
+    reasoning=(str, Field(description="Brief justification for the chosen category")),
+    __doc__="The committed category for the transaction and a brief justification.",
+)
+
+
+# Built once at import and reused across all transactions. ChatOpenAI is pointed
+# at the Responses API (use_responses_api=True) to preserve reasoning-effort
+# behavior; create_agent runs the model+tools loop and emits structured output.
+_model = ChatOpenAI(
+    model=MODEL,
+    use_responses_api=True,
+    reasoning_effort=REASONING_EFFORT,
+)
+agent = create_agent(
+    model=_model,
+    tools=AGENT_TOOLS,
+    system_prompt=SYSTEM_PROMPT,
+    response_format=Categorization,
+)
 
 
 def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
@@ -159,8 +213,7 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
         f"  Account: {transaction['Account']}\n\n"
         "Five most similar past transactions:\n"
         f"{similar_block}\n\n"
-        "Categorize this transaction into exactly ONE of these categories by "
-        "calling categorize_transaction:\n"
+        "Categorize this transaction into exactly ONE of these categories:\n"
         f"{categories_block}"
     )
 
@@ -171,125 +224,54 @@ def _validate_category(category: str) -> str:
     raise ValueError(f"model returned invalid category: {category!r}")
 
 
-def _extract_function_calls(output) -> list:
-    calls = []
-    for item in output:
-        if isinstance(item, dict):
-            if item.get("type") == "function_call":
-                calls.append({
-                    "name": item.get("name"),
-                    "arguments": item.get("arguments"),
-                    "call_id": item.get("call_id"),
-                })
-        else:
-            if getattr(item, "type", None) == "function_call":
-                calls.append({
-                    "name": item.name,
-                    "arguments": item.arguments,
-                    "call_id": item.call_id,
-                })
-    return calls
-
-
-def _serialize_output(output) -> list:
-    # Convert SDK objects to plain dicts so they round-trip cleanly as input
-    # on the next responses.create call.
-    serialized = []
-    for item in output:
-        if isinstance(item, dict):
-            serialized.append(item)
-        elif hasattr(item, "model_dump"):
-            serialized.append(item.model_dump(exclude_none=True))
-        else:
-            serialized.append(dict(item))
-    return serialized
-
-
 async def categorize_one(
     transaction: dict,
     archive: pd.DataFrame,
-    client: AsyncOpenAI,
+    client: AsyncOpenAI | None = None,
 ) -> CategorizationResult:
+    # `client` is accepted but unused: the LangChain model and agent are built
+    # once at module load. It is kept in the signature so existing callers
+    # (pipeline.py, eval.py, categorize_dataframe) need no changes.
     start = time.perf_counter()
-    usage = {
-        "input_tokens": 0,
-        "cached_input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-    }
-    rounds = 0
-    tool_counts: dict = {}
-
-    def _result(category: str, reasoning: str | None) -> CategorizationResult:
-        return CategorizationResult(
-            category=_validate_category(category),
-            reasoning=reasoning,
-            elapsed_seconds=time.perf_counter() - start,
-            rounds=rounds,
-            tool_invocations=dict(tool_counts),
-            **usage,
-        )
 
     windowed = _trailing_window(archive, transaction["Date"])
     similar = top_n_similar(transaction["Name"], windowed, n=5)
     priming = _build_priming_message(transaction, similar)
 
-    input_list = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": priming},
-    ]
-
-    for _ in range(MAX_ROUNDS):
-        rounds += 1
-        resp = await client.responses.create(
-            model=MODEL,
-            input=input_list,
-            tools=TOOL_DEFINITIONS,
-            tool_choice="required",
-            reasoning={"effort": REASONING_EFFORT},
+    try:
+        # Each agent round is ~2 supersteps (model call + tool call); the final
+        # structured-output step adds a couple more. Map MAX_ROUNDS to a
+        # recursion limit with a small buffer for the structured-output nodes.
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": priming}]},
+            config={"recursion_limit": MAX_ROUNDS * 2 + 3},
         )
-        _accumulate_usage(usage, resp.usage)
-        input_list += _serialize_output(resp.output)
+    except GraphRecursionError as e:
+        # Hit the loop ceiling without committing a category. The old loop
+        # force-called the terminal tool here; with structured output there is
+        # no clean force hook, so surface this as an error (caught by
+        # categorize_dataframe's bounded wrapper into an error row) rather than
+        # fabricating a best guess.
+        raise RuntimeError(
+            f"agent hit recursion limit without a category for txn "
+            f"{transaction.get('Name')!r}"
+        ) from e
 
-        for call in _extract_function_calls(resp.output):
-            if call["name"] == "categorize_transaction":
-                args = json.loads(call["arguments"])
-                return _result(args["category"], args.get("reasoning"))
+    usage, tool_counts, rounds = _aggregate_run(result["messages"])
 
-            tool_counts[call["name"]] = tool_counts.get(call["name"], 0) + 1
+    structured = result.get("structured_response")
+    if structured is None:
+        raise RuntimeError(
+            f"agent produced no structured_response for txn {transaction.get('Name')!r}"
+        )
 
-            try:
-                args = json.loads(call["arguments"] or "{}")
-            except json.JSONDecodeError:
-                result = json.dumps({"error": "malformed tool arguments JSON"})
-            else:
-                result = await dispatch_tool(call["name"], args)
-
-            input_list.append({
-                "type": "function_call_output",
-                "call_id": call["call_id"],
-                "output": result,
-            })
-
-    logger.warning(
-        "categorize_one hit MAX_ROUNDS=%d for txn %r; forcing categorize_transaction",
-        MAX_ROUNDS, transaction.get("Name"),
-    )
-    rounds += 1
-    final = await client.responses.create(
-        model=MODEL,
-        input=input_list,
-        tools=TOOL_DEFINITIONS,
-        tool_choice={"type": "function", "name": "categorize_transaction"},
-        reasoning={"effort": REASONING_EFFORT},
-    )
-    _accumulate_usage(usage, final.usage)
-    for call in _extract_function_calls(final.output):
-        if call["name"] == "categorize_transaction":
-            args = json.loads(call["arguments"])
-            return _result(args["category"], args.get("reasoning"))
-    raise RuntimeError(
-        f"forced categorize_transaction returned no function_call for txn {transaction!r}"
+    return CategorizationResult(
+        category=_validate_category(structured.category),
+        reasoning=structured.reasoning,
+        elapsed_seconds=time.perf_counter() - start,
+        rounds=rounds,
+        tool_invocations=tool_counts,
+        **usage,
     )
 
 
