@@ -7,6 +7,8 @@ import re
 import threading
 from datetime import timedelta
 
+from bs4 import BeautifulSoup
+
 from categorizer.archive.google_auth import build_gmail_service
 from categorizer.tools._common import parse_iso_date, run_blocking
 
@@ -57,15 +59,23 @@ def _collect(part, plain, html):
 
 
 def _extract_body(payload) -> str:
-    # Prefer text/plain (already human-readable); fall back to stripping tags
-    # from text/html. Whitespace is collapsed so the cap measures real content,
-    # not the markup indentation Amazon emails are padded with.
+    # Prefer text/plain (already human-readable); fall back to parsing text/html
+    # with BeautifulSoup. Whitespace is collapsed so the cap measures real
+    # content, not the markup indentation Amazon emails are padded with.
     plain, html = [], []
     _collect(payload, plain, html)
     if plain:
         text = "\n".join(plain)
     elif html:
-        text = re.sub(r"<[^>]+>", " ", "\n".join(html))
+        soup = BeautifulSoup("\n".join(html), "html.parser")
+        # get_text() includes <style>/<script> CDATA, so drop those elements
+        # first — otherwise inline CSS (multi-KB in Ally/marketing emails)
+        # eats the whole BODY_CHAR_CAP before any real content. BeautifulSoup
+        # also decodes HTML entities (e.g. &#x62; -> b), which the old regex
+        # could not. <head> is dropped for the same boilerplate reason.
+        for tag in soup(["style", "script", "head"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ")
     else:
         text = ""
     text = re.sub(r"\s+", " ", text).strip()

@@ -95,8 +95,18 @@ def _build_target(pool_archive):
             "Amount": inputs["Amount"],
             "Account": inputs["Account"],
         }
-        r = await categorize_one(txn, pool_archive)
-        return {"category": r.category, "reasoning": r.reasoning, "error": r.error}
+        try:
+            r = await categorize_one(txn, pool_archive)
+            return {"category": r.category, "reasoning": r.reasoning, "error": r.error}
+        except Exception as e:  # noqa: BLE001
+            # categorize_one *raises* on the recursion limit / missing
+            # structured_response (agent.py). If that propagated out of the
+            # target, LangSmith would mark the run errored and skip the
+            # `correct` evaluator entirely — the example would show "No
+            # feedback" and silently drop out of accuracy. Mirror agent_eval.py's
+            # bounded() wrapper instead: return a None category so `correct`
+            # scores it False and the example stays in the denominator.
+            return {"category": None, "reasoning": None, "error": f"{type(e).__name__}: {e}"}
 
     return target
 
