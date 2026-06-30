@@ -18,6 +18,7 @@ from langchain.tools import tool
 
 from categorizer.tools._common import run_blocking
 from categorizer.tools.calendar import get_calendar_service, search_calendar_sync
+from categorizer.tools.gmail import get_gmail_service, search_gmail_sync
 from categorizer.tools.messages import search_messages_sync
 from categorizer.tools.web import web_search_sync
 
@@ -53,6 +54,23 @@ async def search_calendar(start_date: str, end_date: str) -> str:
 
 
 @tool
+async def search_gmail(keyword: str, start_date: str, end_date: str) -> str:
+    """Keyword search the user's Gmail for messages (e.g. receipts or order confirmations) within an ISO date range. Returns sender, subject, date, and snippet.
+
+    Args:
+        keyword: Term(s) to match. Multiple space-separated terms are AND-ed, so
+            you can combine e.g. a merchant name with a dollar amount ("amazon 10.81").
+        start_date: Inclusive start date, ISO format YYYY-MM-DD.
+        end_date: Inclusive end date, ISO format YYYY-MM-DD.
+    """
+    try:
+        service = await get_gmail_service()
+        return await run_blocking(search_gmail_sync, service, keyword, start_date, end_date)
+    except Exception as e:  # noqa: BLE001 - degrade to error payload, see module docstring
+        return json.dumps({"error": f"{type(e).__name__}: {e}"})
+
+
+@tool
 async def web_search(query: str) -> str:
     """Search the web via Perplexity for information about a merchant, brand, or business. Useful for identifying unfamiliar transaction names.
 
@@ -67,5 +85,5 @@ async def web_search(query: str) -> str:
 
 # Non-terminal tools the agent may consult. The terminal commit is structured
 # output, not a tool, so it is not in this list.
-AGENT_TOOLS = [search_messages, search_calendar, web_search]
+AGENT_TOOLS = [search_messages, search_calendar, search_gmail, web_search]
 TOOL_NAMES = [t.name for t in AGENT_TOOLS]

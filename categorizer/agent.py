@@ -146,6 +146,8 @@ Tips on tool usage:
     - Default to loading the day of the transaction and the 2 days before
 *web_search*
     - Use when the merchant name is unfamiliar and you need to identify what kind of business it is
+*search_gmail*
+    - Use to identify items in E-commerce orders. Try searching vendor AND amount, e.g. "Amazon 25.21"
 
 Some categories carry their own handling instructions; these appear after the
 category name in the list shown to you. Follow them.

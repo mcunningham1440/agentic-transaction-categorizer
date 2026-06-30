@@ -11,6 +11,7 @@ from categorizer.paths import CREDENTIALS_PATH, TOKEN_PATH
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 
@@ -58,3 +59,7 @@ def build_calendar_service():
 
 def build_sheets_service():
     return build("sheets", "v4", credentials=load_credentials(), cache_discovery=False)
+
+
+def build_gmail_service():
+    return build("gmail", "v1", credentials=load_credentials(), cache_discovery=False)
