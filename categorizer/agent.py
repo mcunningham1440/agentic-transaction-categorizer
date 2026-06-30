@@ -132,8 +132,25 @@ def _aggregate_run(messages) -> tuple[dict, dict, int]:
     return usage, tool_counts, rounds
 
 
+def _build_categories_block() -> str:
+    """Render the authoritative category list (with per-category instructions).
+
+    This is identical for every transaction, so it lives in the static system
+    prompt rather than the per-transaction user message — that keeps it inside
+    the cacheable prompt prefix (see SYSTEM_PROMPT / _build_priming_message).
+    """
+    cat_lines = []
+    for c in CATEGORIES:
+        instr = CATEGORY_INSTRUCTIONS.get(c, "")
+        if instr:
+            # Indent any wrapped/multi-line instructions under the bullet.
+            cat_lines.append(f"  - {c}: {instr.replace(chr(10), chr(10) + '      ')}")
+        else:
+            cat_lines.append(f"  - {c}")
+    return "\n".join(cat_lines)
+
 SYSTEM_PROMPT = """
-Your task is to assign a financial transaction into one of the categories listed by the user using the tools available to you.
+Your task is to assign a financial transaction into one of the categories listed below using the tools available to you.
 You are given the 5 most-similar past transactions in the user message.
 If they clearly point to one category, give your final answer immediately.
 If they conflict or are unclear, consult the other tools.
@@ -152,8 +169,10 @@ Tips on tool usage:
     - Use a date range +/- 2 days from the transaction and expand up to +/- 2 weeks if necessary
 
 Some categories carry their own handling instructions; these appear after the
-category name in the list shown to you. Follow them.
-"""
+category name in the list below. Follow them.
+
+Assign the transaction to exactly ONE of these categories:
+""" + _build_categories_block()
 
 
 # Structured-output schema the agent commits its answer to (replaces the old
@@ -171,6 +190,11 @@ Categorization = create_model(
 )
 
 
+# Stable cache key shared by every request so OpenAI routes them to the same
+# machine for prefix-cache hits; bump the version suffix when the static prefix
+# (system prompt, tools, schema, category list) changes materially.
+PROMPT_CACHE_KEY = "txn-categorizer/v1"
+
 # Built once at import and reused across all transactions. ChatOpenAI is pointed
 # at the Responses API (use_responses_api=True) to preserve reasoning-effort
 # behavior; create_agent runs the model+tools loop and emits structured output.
@@ -178,6 +202,10 @@ _model = ChatOpenAI(
     model=MODEL,
     use_responses_api=True,
     reasoning_effort=REASONING_EFFORT,
+    model_kwargs={
+        "prompt_cache_key": PROMPT_CACHE_KEY,
+        "prompt_cache_retention": "24h",
+    },
 )
 agent = create_agent(
     model=_model,
@@ -199,16 +227,6 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
             )
         similar_block = "\n".join(lines)
 
-    cat_lines = []
-    for c in CATEGORIES:
-        instr = CATEGORY_INSTRUCTIONS.get(c, "")
-        if instr:
-            # Indent any wrapped/multi-line instructions under the bullet.
-            cat_lines.append(f"  - {c}: {instr.replace(chr(10), chr(10) + '      ')}")
-        else:
-            cat_lines.append(f"  - {c}")
-    categories_block = "\n".join(cat_lines)
-
     return (
         "Transaction:\n"
         f"  Date: {transaction['Date']}\n"
@@ -216,9 +234,7 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
         f"  Amount: ${transaction['Amount']}\n"
         f"  Account: {transaction['Account']}\n\n"
         "Five most similar past transactions:\n"
-        f"{similar_block}\n\n"
-        "Categorize this transaction into exactly ONE of these categories:\n"
-        f"{categories_block}"
+        f"{similar_block}"
     )
 
 
