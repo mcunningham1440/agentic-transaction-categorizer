@@ -1,0 +1,5 @@
+[mcp_servers.langchainDocs]
+url = "https://docs.langchain.com/mcp"
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"

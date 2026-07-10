@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.session_id' | { read -r sid; mkdir -p /tmp/claude-hooks && touch \"/tmp/claude-hooks/edits-${sid}.flag\"; } 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "DATA=$(jq -r '[(.stop_hook_active // false | tostring), .session_id] | @tsv'); SHA=$(echo \"$DATA\" | cut -f1); SID=$(echo \"$DATA\" | cut -f2); FLAG=\"/tmp/claude-hooks/edits-${SID}.flag\"; if [ \"$SHA\" = \"true\" ]; then rm -f \"$FLAG\"; exit 0; fi; if [ ! -f \"$FLAG\" ]; then exit 0; fi; rm \"$FLAG\"; printf '%s' '{\"decision\":\"block\",\"reason\":\"Before stopping: check whether the code changes you made this turn made any information in CLAUDE.md (at /Users/michaelcunningham/Desktop/general_coding/agentic_transaction_categorizer/CLAUDE.md) obsolete; if so, update it to reflect reality, keeping it under 200 lines (warn the user if it exceeds 150). If the file is still accurate, briefly say so and stop.\"}'"
+          }
+        ]
+      }
+    ]
+  }
+}

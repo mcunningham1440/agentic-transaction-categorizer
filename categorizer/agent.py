@@ -16,12 +16,13 @@ from categorizer.categories import CATEGORIES, CATEGORY_INSTRUCTIONS
 from categorizer.tools import AGENT_TOOLS
 
 
-MODEL = "gpt-5.4-mini"
+MODEL = "gpt-5.6-luna"
 REASONING_EFFORT = "low"
 MAX_ROUNDS = 10
 
 MODEL_PRICING = {
     "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
+    "gpt-5.6-luna": {"input": 1.00, "cached_input": 0.10, "output": 6.00},
 }
 
 
@@ -164,7 +165,7 @@ Tips on tool usage:
 *web_search*
     - Use when the merchant name is unfamiliar and you need to identify what kind of business it is
 *search_gmail*
-    - Use to identify items in E-commerce orders and Zelle transaction
+    - Always use to identify items in E-commerce orders (e.g. Amazon) and Zelle transactions
     - Try searching vendor AND amount, e.g. "Amazon 25.21"
     - Use a date range +/- 2 days from the transaction and expand up to +/- 2 weeks if necessary
 
