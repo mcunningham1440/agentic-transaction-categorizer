@@ -16,3 +16,4 @@ __pycache__/
 data/
 sandboxes/
 .pw-chase-profile/
+.pw-*-profile/

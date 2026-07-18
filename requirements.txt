@@ -11,3 +11,4 @@ perplexityai>=0.20.0
 python-dotenv
 PyYAML
 beautifulsoup4
+playwright>=1.60
