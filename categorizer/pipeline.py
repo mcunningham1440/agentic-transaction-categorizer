@@ -1,7 +1,8 @@
 import asyncio
 import os
+import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from Levenshtein import distance as levenshtein_distance
@@ -11,6 +12,45 @@ from categorizer.agent import categorize_dataframe
 from categorizer.archive.sheets import load_archive_from_sheets
 from categorizer.categories import CATEGORIES
 from categorizer.paths import DATA_DIR, OUTPUT_DIR
+
+
+PERIOD_PATTERN = re.compile(r"^(?P<year>\d{4})-(?P<month>0[1-9]|1[0-2])$")
+
+
+def _parse_period(value: str) -> tuple[int, int]:
+    """Parse a canonical YYYY-MM period and return (year, month)."""
+    match = PERIOD_PATTERN.fullmatch(value.strip())
+    if match is None:
+        raise ValueError("Period must use YYYY-MM format (for example, 2026-04).")
+    return int(match.group("year")), int(match.group("month"))
+
+
+def _previous_period(today: datetime) -> str:
+    previous_month = datetime(today.year, today.month, 1) - timedelta(days=1)
+    return previous_month.strftime("%Y-%m")
+
+
+def _prompt_for_period(today: datetime | None = None) -> tuple[str, int, int]:
+    default_period = _previous_period(today or datetime.now())
+    use_default = input(f"Use {default_period}? (Y/n): ").strip().lower()
+    if use_default in {"", "y"}:
+        period = default_period
+    else:
+        while True:
+            period = input("Enter the period (YYYY-MM): ").strip()
+            try:
+                year, month = _parse_period(period)
+                return period, year, month
+            except ValueError as exc:
+                print(exc)
+
+    year, month = _parse_period(period)
+    return period, year, month
+
+
+def _filter_to_period(frame: pd.DataFrame, year: int, month: int) -> pd.DataFrame:
+    dates = frame["Date"].dt
+    return frame[(dates.year == year) & (dates.month == month)]
 
 
 def find_close_strings(query_string, df, cutoff=0.8):
@@ -61,24 +101,8 @@ def load_archive() -> pd.DataFrame:
 
 
 async def main():
-    # Calculate previous month as default
-    today = datetime.now()
-    if today.month == 1:
-        default_month = 12
-        default_year = (today.year - 1) % 100
-    else:
-        default_month = today.month - 1
-        default_year = today.year % 100
-
-    use_default = input(f"Use {default_month}/{default_year}? (Y/n): ").strip().lower()
-    if use_default == "" or use_default == "y":
-        month = default_month
-        year = default_year
-    else:
-        month = int(input("Enter the month number: "))
-        year = int(input("Enter the last two digits of the year: "))
-
-    month_folder = os.path.join(DATA_DIR, f"{month}-{year}")
+    period, year, month = _prompt_for_period()
+    period_folder = os.path.join(DATA_DIR, period)
 
     sams_frames = []
     chase_frame = apple_frame = venmo_frame = ally_frame = None
@@ -87,8 +111,8 @@ async def main():
 
     # See transaction_csv_sources.md (gitignored) for where to download each
     # account's CSV and the filename-prefix convention used below.
-    for item in os.listdir(month_folder):
-        item_path = os.path.join(month_folder, item)
+    for item in os.listdir(period_folder):
+        item_path = os.path.join(period_folder, item)
 
         if item[:5] == "Chase":
             chase_frame = pd.read_csv(item_path)
@@ -128,7 +152,7 @@ async def main():
         chase_frame = chase_frame[["Transaction Date", "Description", "Amount"]]
         chase_frame.columns = ["Date", "Name", "Amount"]
         chase_frame["Date"] = pd.to_datetime(chase_frame["Date"])
-        chase_frame = chase_frame[chase_frame["Date"].dt.month == month]
+        chase_frame = _filter_to_period(chase_frame, year, month)
         chase_frame["Account"] = "Chase"
         frames_to_concat.append(chase_frame)
 
@@ -137,7 +161,7 @@ async def main():
         apple_frame["Amount (USD)"] = -apple_frame["Amount (USD)"]
         apple_frame.columns = ["Date", "Name", "Amount"]
         apple_frame["Date"] = pd.to_datetime(apple_frame["Date"])
-        apple_frame = apple_frame[apple_frame["Date"].dt.month == month]
+        apple_frame = _filter_to_period(apple_frame, year, month)
         apple_frame["Account"] = "Apple"
         frames_to_concat.append(apple_frame)
 
@@ -158,6 +182,7 @@ async def main():
         venmo_frame = venmo_frame[["Datetime", "Description", "Amount (total)"]]
         venmo_frame = venmo_frame.rename(columns={"Datetime": "Date", "Description": "Name", "Amount (total)": "Amount"})
         venmo_frame["Date"] = pd.to_datetime(venmo_frame["Date"])
+        venmo_frame = _filter_to_period(venmo_frame, year, month)
         venmo_frame["Account"] = "Venmo"
         frames_to_concat.append(venmo_frame)
 
@@ -165,7 +190,7 @@ async def main():
         sam_frame = pd.concat(sams_frames)
         sam_frame = sam_frame.rename(columns={"Transaction Date": "Date", "Description": "Name", "Amount": "Amount"})
         sam_frame["Date"] = pd.to_datetime(sam_frame["Date"])
-        sam_frame = sam_frame[sam_frame["Date"].dt.month == month]
+        sam_frame = _filter_to_period(sam_frame, year, month)
         sam_frame = sam_frame[["Date", "Name", "Amount"]]
         sam_frame["Account"] = "Sam's Club"
         frames_to_concat.append(sam_frame)
@@ -173,7 +198,7 @@ async def main():
     if ally_frame is not None:
         ally_frame = ally_frame[["Date", " Amount", " Description"]]
         ally_frame["Date"] = pd.to_datetime(ally_frame["Date"])
-        ally_frame = ally_frame[ally_frame["Date"].dt.month == month]
+        ally_frame = _filter_to_period(ally_frame, year, month)
         ally_frame = ally_frame.rename(columns={" Amount": "Amount", " Description": "Name"})
         ally_frame["Account"] = "Ally"
         frames_to_concat.append(ally_frame)
