@@ -6,6 +6,7 @@ from typing import Literal
 
 import pandas as pd
 from langchain.agents import create_agent
+from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
 from openai import AsyncOpenAI
@@ -16,13 +17,31 @@ from categorizer.categories import CATEGORIES, CATEGORY_INSTRUCTIONS
 from categorizer.tools import AGENT_TOOLS
 
 
+# Which hosted API serves MODEL. "openai" reads OPENAI_API_KEY, "fireworks"
+# reads FIREWORKS_API_KEY. Fireworks model ids are fully qualified, e.g.
+# "accounts/fireworks/models/deepseek-v4-flash".
+PROVIDER: Literal["openai", "fireworks"] = "openai"
 MODEL = "gpt-5.6-luna"
-REASONING_EFFORT = "low"
+# Set to None for models that don't accept a reasoning_effort request field
+# (most non-reasoning open-weight models on Fireworks reject it outright).
+REASONING_EFFORT: str | None = "low"
 MAX_ROUNDS = 10
 
+# USD per 1M tokens. Keyed by model id; OpenAI and Fireworks ids never collide.
+# Fireworks rates are the Standard serverless tier (docs.fireworks.ai/serverless/pricing,
+# checked 2026-08-02); the Fast/Priority tiers cost more, so a run pinned to one
+# of those tiers is under-costed by this table.
 MODEL_PRICING = {
     "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
     "gpt-5.6-luna": {"input": 1.00, "cached_input": 0.10, "output": 6.00},
+    "accounts/fireworks/models/kimi-k3": {"input": 3.00, "cached_input": 0.30, "output": 15.00},
+    "accounts/fireworks/models/deepseek-v4-pro": {"input": 1.74, "cached_input": 0.145, "output": 3.48},
+    "accounts/fireworks/models/deepseek-v4-flash": {"input": 0.14, "cached_input": 0.028, "output": 0.28},
+    "accounts/fireworks/models/glm-5p2": {"input": 1.40, "cached_input": 0.14, "output": 4.40},
+    "accounts/fireworks/models/qwen3p7-plus": {"input": 0.40, "cached_input": 0.08, "output": 1.60},
+    "accounts/fireworks/models/minimax-m3": {"input": 0.30, "cached_input": 0.06, "output": 1.20},
+    "accounts/fireworks/models/gpt-oss-120b": {"input": 0.15, "cached_input": 0.015, "output": 0.60},
+    "accounts/fireworks/models/gpt-oss-20b": {"input": 0.07, "cached_input": 0.035, "output": 0.30},
 }
 
 
@@ -191,23 +210,56 @@ Categorization = create_model(
 )
 
 
-# Stable cache key shared by every request so OpenAI routes them to the same
-# machine for prefix-cache hits; bump the version suffix when the static prefix
-# (system prompt, tools, schema, category list) changes materially.
+# Stable cache key shared by every request so the provider routes them to the
+# same machine for prefix-cache hits; bump the version suffix when the static
+# prefix (system prompt, tools, schema, category list) changes materially.
 PROMPT_CACHE_KEY = "txn-categorizer/v1"
 
-# Built once at import and reused across all transactions. ChatOpenAI is pointed
-# at the Responses API (use_responses_api=True) to preserve reasoning-effort
-# behavior; create_agent runs the model+tools loop and emits structured output.
-_model = ChatOpenAI(
-    model=MODEL,
-    use_responses_api=True,
-    reasoning_effort=REASONING_EFFORT,
-    model_kwargs={
-        "prompt_cache_key": PROMPT_CACHE_KEY,
-        "prompt_cache_retention": "24h",
-    },
-)
+
+def _build_model():
+    """Build the chat model for PROVIDER/MODEL.
+
+    OpenAI runs on the Responses API (use_responses_api=True) to preserve
+    reasoning-effort behavior, with explicit prompt-cache routing/retention.
+
+    Fireworks is served by langchain-fireworks' ChatFireworks (Chat Completions
+    under the hood). Two provider differences worth knowing, neither of which
+    errors out:
+      - Prompt caching is automatic and has no cache-key parameter; the OpenAI
+        `prompt_cache_key`/`prompt_cache_retention` fields do not exist there.
+        The `user` field is Fireworks' documented session-affinity hint, so it
+        carries PROMPT_CACHE_KEY to pin related requests to one replica. If
+        Fireworks does not report `prompt_tokens_details.cached_tokens`,
+        `cached_input_tokens` stays 0 and reported cost is an *over*estimate.
+      - langchain-fireworks does not map reasoning tokens into
+        `output_token_details`, so `reasoning_tokens` is reported as 0 even for
+        reasoning models. `output_tokens` still includes them, so cost is
+        unaffected — only the reasoning-token column in the eval report is.
+
+    Raises ValueError for an unknown PROVIDER rather than defaulting to OpenAI.
+    """
+    if PROVIDER == "openai":
+        return ChatOpenAI(
+            model=MODEL,
+            use_responses_api=True,
+            reasoning_effort=REASONING_EFFORT,
+            model_kwargs={
+                "prompt_cache_key": PROMPT_CACHE_KEY,
+                "prompt_cache_retention": "24h",
+            },
+        )
+    if PROVIDER == "fireworks":
+        return ChatFireworks(
+            model=MODEL,
+            reasoning_effort=REASONING_EFFORT,
+            model_kwargs={"user": PROMPT_CACHE_KEY},
+        )
+    raise ValueError(f"unknown PROVIDER: {PROVIDER!r}")
+
+
+# Built once at import and reused across all transactions; create_agent runs the
+# model+tools loop and emits structured output.
+_model = _build_model()
 agent = create_agent(
     model=_model,
     tools=AGENT_TOOLS,
@@ -299,7 +351,7 @@ async def categorize_one(
 async def categorize_dataframe(
     df: pd.DataFrame,
     archive: pd.DataFrame,
-    client: AsyncOpenAI,
+    client: AsyncOpenAI | None = None,
     concurrency: int = 20,
 ) -> list[CategorizationResult]:
     sem = asyncio.Semaphore(concurrency)

@@ -42,7 +42,7 @@ from datetime import datetime
 import pandas as pd
 from langsmith import Client
 
-from categorizer.agent import categorize_one, compute_cost, MODEL
+from categorizer.agent import categorize_one, compute_cost, MODEL, PROVIDER
 from categorizer.categories import CATEGORIES
 from categorizer.paths import OUTPUT_DIR
 from categorizer.pipeline import load_archive
@@ -132,6 +132,18 @@ def _example_payloads(held_out):
             "outputs": {"category": row.Category},
         })
     return examples
+
+
+def _short_model_name(model: str) -> str:
+    """Last path segment of a model id, for use in experiment names.
+
+    Fireworks ids are fully qualified ("accounts/fireworks/models/glm-5p2"), and
+    the slashes read as path separators in LangSmith experiment names. OpenAI
+    ids have no slash and pass through unchanged. Two Fireworks models sharing a
+    trailing segment across accounts would collide here; the full id is still
+    recorded in the experiment `metadata` and in the CSV report.
+    """
+    return model.rsplit("/", 1)[-1]
 
 
 def sync_dataset(client, dataset_name, held_out):
@@ -459,9 +471,10 @@ async def main():
         data=dataset_name,
         evaluators=[correct],
         max_concurrency=args.concurrency,
-        experiment_prefix=f"{MODEL}-k{args.k}-frac{args.frac}",
+        experiment_prefix=f"{_short_model_name(MODEL)}-k{args.k}-frac{args.frac}",
         metadata={
             "model": MODEL,
+            "provider": PROVIDER,
             "k": args.k,
             "year": args.year,
             "frac": args.frac,
@@ -480,6 +493,7 @@ async def main():
     if args.csv is not None:
         config = {
             "model": MODEL,
+            "provider": PROVIDER,
             "target_year": args.year,
             "k_months": args.k,
             "holdout_fraction": args.frac,

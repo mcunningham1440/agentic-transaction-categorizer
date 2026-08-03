@@ -1,6 +1,7 @@
 openai
 langchain>=1.1
 langchain-openai
+langchain-fireworks
 langsmith
 pandas
 python-Levenshtein

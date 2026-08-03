@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from Levenshtein import distance as levenshtein_distance
-from openai import AsyncOpenAI
 
 from categorizer.agent import categorize_dataframe
 from categorizer.archive.sheets import load_archive_from_sheets
@@ -208,8 +207,7 @@ async def main():
     archive = load_archive()
 
     print(f"\nCategorizing {len(all_frames)} transactions via LLM agent...")
-    client = AsyncOpenAI()
-    results = await categorize_dataframe(all_frames, archive, client)
+    results = await categorize_dataframe(all_frames, archive)
     # Preserve prior behavior: failed categorizations land in the CSV as
     # "ERROR: ..." strings rather than aborting the whole run.
     all_frames["Category"] = [
