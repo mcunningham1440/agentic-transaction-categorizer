@@ -274,15 +274,16 @@ def _build_priming_message(transaction: dict, similar: pd.DataFrame) -> str:
     else:
         lines = []
         for i, row in enumerate(similar.itertuples(index=False), start=1):
-            lines.append(
-                f"  {i}. {row.Name} | ${row.Amount} | {row.Category} "
-                f"(similarity={row.Similarity:.2f})"
-            )
+            lines.append(f"  {i}. {row.Name} | ${row.Amount} | {row.Category}")
         similar_block = "\n".join(lines)
 
+    # Date-only: no source CSV carries a meaningful transaction time. Chase /
+    # Apple / Sam's Club are date-only at the source, Ally's separate Time
+    # column is dropped at ingest, and Venmo's ISO Datetime has no offset (its
+    # times read as UTC), so rendering it would mislead the date-range tools.
     return (
         "Transaction:\n"
-        f"  Date: {transaction['Date']}\n"
+        f"  Date: {pd.Timestamp(transaction['Date']).date().isoformat()}\n"
         f"  Name: {transaction['Name']}\n"
         f"  Amount: ${transaction['Amount']}\n"
         f"  Account: {transaction['Account']}\n\n"
