@@ -1,3 +1,4 @@
+import json
 import os
 
 from google.auth.exceptions import RefreshError
@@ -10,21 +11,45 @@ from categorizer.paths import CREDENTIALS_PATH, TOKEN_PATH
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    # Read/write, not .readonly: the pipeline writes each month's categorized
+    # transactions into a new tab at the end of a run (see sheets.write_month_tab).
+    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/gmail.readonly",
 ]
+
+
+def _stored_scopes():
+    """Scopes recorded in token.json, or None if unreadable.
+
+    Read straight from the file rather than from a Credentials object: passing
+    `scopes=SCOPES` to from_authorized_user_file makes `creds.scopes` echo back
+    what we *asked* for (google/oauth2/credentials.py only falls back to the
+    stored value when `scopes is None`), so comparing against it is a no-op.
+    """
+    try:
+        with open(TOKEN_PATH) as f:
+            scopes = json.load(f).get("scopes")
+    except (OSError, ValueError):
+        # Unreadable/corrupt token file: report unknown so the caller discards
+        # it and re-runs the OAuth flow rather than trusting it.
+        return None
+    if isinstance(scopes, str):
+        scopes = scopes.split(" ")
+    return scopes
 
 
 def load_credentials():
     creds = None
     if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         # If the stored token was issued for a narrower scope set than we now
-        # require (e.g. calendar-only tokens predating the Sheets scope),
+        # require (e.g. read-only Sheets tokens predating the archive writer),
         # force a fresh OAuth flow instead of silently using a token that
         # would 403 on the new API.
-        if creds and creds.scopes and not set(SCOPES).issubset(set(creds.scopes)):
-            creds = None
+        stored = _stored_scopes()
+        if stored is None or not set(SCOPES).issubset(set(stored)):
+            os.remove(TOKEN_PATH)
+        else:
+            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if not creds or not creds.valid:
         refreshed = False
         if creds and creds.expired and creds.refresh_token:

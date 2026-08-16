@@ -8,7 +8,7 @@ import pandas as pd
 from Levenshtein import distance as levenshtein_distance
 
 from categorizer.agent import categorize_dataframe
-from categorizer.archive.sheets import load_archive_from_sheets
+from categorizer.archive.sheets import load_archive_from_sheets, write_month_tab
 from categorizer.categories import CATEGORIES
 from categorizer.paths import DATA_DIR, OUTPUT_DIR
 
@@ -250,6 +250,12 @@ async def main():
         # Shouldn't happen: load_archive() already required this env var and
         # would have raised earlier. Warn rather than fail at the very end.
         print("CURRENT_YEAR_ARCHIVE_SHEET_ID not set; skipping archive sheet open.")
+
+    # Done last, after the CSV is on disk and the review tabs are open, so a
+    # Sheets API failure surfaces as an error without costing the run's work.
+    print(f"\nWriting {len(all_frames)} transactions to a new tab in the archive sheet...")
+    new_tab = write_month_tab(all_frames, month)
+    print(f"Wrote tab '{new_tab}'.")
 
 
 if __name__ == "__main__":
